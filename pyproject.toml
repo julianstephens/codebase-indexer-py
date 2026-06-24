@@ -1,5 +1,6 @@
 [project]
 name = "codebase-indexer"
+description = "A simplified, non-mcp version of codebase-memory-mcp"
 version = "1.0.0"
 requires-python = ">=3.13"
 dependencies = [
