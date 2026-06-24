@@ -1,11 +1,12 @@
 [project]
 name = "codebase-indexer-py"
 description = "A simplified, non-mcp version of codebase-memory-mcp"
-version = "1.0.1"
+version = "1.0.2"
 requires-python = ">=3.13"
 readme = "README.md"
 dependencies = [
     "pathspec>=1.1.1",
+    "rich>=14.2.0",
     "tree-sitter>=0.25.2",
     "typer>=0.26.7",
     "zstandard>=0.25.0",
@@ -19,7 +20,7 @@ Homepage = "https://github.com/julianstephens/codebase-indexer"
 Issues = "https://github.com/julianstephens/codebase-indexer/issues"
 
 [tool.uv.build-backend]
-module-name = ["indexer"]
+module-name = ["indexer", "cli"]
 
 [tool.ruff]
 line-length = 88
