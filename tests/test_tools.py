@@ -370,7 +370,7 @@ class TestMaybeTruncate:
         assert any("[source truncated" in line for line in lines)
 
     def test_truncation_notice_contains_byte_count(self):
-        src = "y\n" * 7_000
+        src = "y\n" * 20_000  # ~40 KB > MAX_SOURCE_BYTES (32 KB)
         result = _maybe_truncate(src)
         assert str(MAX_SOURCE_BYTES) in result
 
@@ -521,7 +521,9 @@ class TestBuildConfidenceMap:
         root = _node_row(id=1)
         result = BFSResult(root=root, visited=[], edges=[edge])
         conf_map = _build_confidence_map(result)
-        assert conf_map[7] == pytest.approx(0.0)
+        # Missing confidence is 0.0; since 0.0 is not > 0.0 the key is absent.
+        # The call site defaults to 0.0 when the key is missing.
+        assert 7 not in conf_map
 
     def test_empty_edges(self):
         root = _node_row(id=1)
@@ -533,7 +535,9 @@ class TestBuildConfidenceMap:
         root = _node_row(id=1)
         result = BFSResult(root=root, visited=[], edges=[edge])
         conf_map = _build_confidence_map(result)
-        assert conf_map[3] == pytest.approx(0.0)
+        # Invalid type is coerced to 0.0; same as missing — key absent, defaults at call
+        # site.
+        assert 3 not in conf_map
 
 
 # ---------------------------------------------------------------------------

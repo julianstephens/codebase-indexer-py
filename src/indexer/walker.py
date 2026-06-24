@@ -580,7 +580,7 @@ def _rel_path(entry_path: str, repo_path: Path) -> str:
 
 def _load_dir_specs(
     dir_path: Path,
-    repo_path: Path,
+    repo_path: Path,  # noqa: ARG001
     config: WalkConfig,
     parent_specs: list[pathspec.PathSpec],
 ) -> list[pathspec.PathSpec]:
