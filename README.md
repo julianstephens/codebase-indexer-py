@@ -301,6 +301,9 @@ so git never produces merge conflicts on it.
 The registry resolves raw call sites to qualified names using a
 three-strategy chain:
 
+Call and import inputs are read from `NodeRecord.properties` in pass 6
+(`calls` / `call_sites` and `imports` payloads).
+
 ```
 1. same_module   confidence=0.95
    callee matches a node in the caller's own module or parent package
@@ -334,9 +337,41 @@ Individual test files:
 ```bash
 pytest tests/test_treesitter.py -v   # AST extraction for all 17 languages
 pytest tests/test_registry.py   -v   # call resolution strategies
+pytest tests/test_pipeline.py   -v   # pass-6 v2 call/import parsing and stats
 pytest tests/test_store.py      -v   # SQLite graph store
 pytest tests/test_tools.py      -v   # agent tool functions
 ```
+
+Benchmark matrix (opt-in):
+
+```bash
+# runs language x repo-size benchmark scenarios
+make benchmark
+
+# equivalent direct command
+pytest -n=0 --run-benchmarks -s tests/benchmarks/ -v
+```
+
+The benchmark suite reports, for each language/size combo:
+
+- indexing runtime (seconds)
+- average tokens per file (raw repository text)
+- average tokens per file (agent context from `build_context`)
+- token savings (absolute + percent)
+
+By default benchmark tests are skipped in normal `pytest` runs.
+
+| Language   | Size   | Avg Index (s) | Raw Tokens | Context Tokens | Saved Tokens | Saved % |
+|------------|--------|---------------|------------|----------------|--------------|---------|
+| go         | large  | 0.4270        | 77,487     | 2,903          | 74,584       | 96.25%  |
+| go         | medium | 0.0874        | 20,402     | 5,801          | 14,601       | 71.57%  |
+| go         | small  | 0.0270        | 3,734      | 1,799          | 1,935        | 51.82%  |
+| python     | large  | 0.4583        | 71,759     | 2,904          | 68,855       | 95.95%  |
+| python     | medium | 0.0981        | 18,969     | 6,400          | 12,569       | 66.26%  |
+| python     | small  | 0.0316        | 3,494      | 2,023          | 1,471        | 42.10%  |
+| typescript | large  | 0.4848        | 91,079     | 2,908          | 88,171       | 96.81%  |
+| typescript | medium | 0.0973        | 24,049     | 8,914          | 15,135       | 62.93%  |
+| typescript | small  | 0.0266        | 4,424      | 2,491          | 1,933        | 43.69%  |
 
 ---
 

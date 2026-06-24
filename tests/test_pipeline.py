@@ -6,8 +6,10 @@ from src.indexer.pipeline import (
     _collect_calls_from_records,
     _collect_imports_from_records,
     _pass_resolve_calls,
+    _pass_store,
 )
 from src.indexer.registry import build
+from src.indexer.store import open_memory
 from src.indexer.treesitter import NodeRecord
 
 
@@ -138,3 +140,55 @@ def test_pass_resolve_calls_uses_v2_properties_and_tracks_stats():
     assert edges[0][3]["line"] == 10
     assert calls_resolved == 1
     assert calls_unresolved == 1
+
+
+def test_pass_store_inserts_only_valid_unique_edges():
+    caller = make_record(
+        name="checkout",
+        qn="src.orders.views.checkout",
+        file_path="src/orders/views.py",
+    )
+    target = make_record(
+        name="charge",
+        qn="src.payments.service.charge",
+        file_path="src/payments/service.py",
+    )
+
+    # Includes one valid edge, one unresolved endpoint, and one duplicate.
+    edges = [
+        (
+            "src.orders.views.checkout",
+            "src.payments.service.charge",
+            "CALLS",
+            {"confidence": 0.95, "strategy": "same_module", "line": 10},
+        ),
+        (
+            "src.orders.views.checkout",
+            "src.external.missing",
+            "CALLS",
+            {"confidence": 0.85, "strategy": "import_map", "line": 11},
+        ),
+        (
+            "src.orders.views.checkout",
+            "src.payments.service.charge",
+            "CALLS",
+            {"confidence": 0.95, "strategy": "same_module", "line": 10},
+        ),
+    ]
+
+    db = open_memory()
+    try:
+        _, edges_inserted = _pass_store(
+            db=db,
+            project="my-app",
+            repo_path="/tmp/my-app",
+            records=[caller, target],
+            edges=edges,
+            file_contents={},
+            file_hashes=[],
+            file_languages={},
+        )
+    finally:
+        db.close()
+
+    assert edges_inserted == 1

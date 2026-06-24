@@ -34,6 +34,9 @@ extend-select = ["B", "LOG", "Q", "RET", "SIM", "ARG", "I", "N", "E", "W", "F", 
 
 [tool.pytest.ini_options]
 addopts = "-n=auto"
+markers = [
+    "benchmark: performance and token-efficiency benchmark matrix (opt-in with --run-benchmarks)",
+]
 
 [dependency-groups]
 dev = [
