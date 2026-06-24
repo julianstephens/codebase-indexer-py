@@ -1,5 +1,7 @@
 """Tests for v2 call/import handling in pipeline pass 6."""
 
+from pathlib import Path
+
 from src.indexer.extractor import ExtractionResult
 from src.indexer.pipeline import (
     PipelineConfig,
@@ -10,7 +12,7 @@ from src.indexer.pipeline import (
     run,
 )
 from src.indexer.registry import build
-from src.indexer.store import open_memory
+from src.indexer.store import SearchParams, open_memory, open_path_readonly
 from src.indexer.treesitter import NodeRecord
 
 
@@ -317,3 +319,162 @@ def test_run_reports_relationship_unavailable_language(tmp_path):
     )
 
     assert "unknown" in result.relationship_unavailable_languages
+
+
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def test_incremental_run_preserves_graph_state_and_rebuilds_edges(tmp_path):
+    repo = tmp_path / "repo"
+    cache_dir = tmp_path / "cache"
+
+    _write(
+        repo / "src" / "a.py",
+        """
+from src.b import target
+
+
+def caller():
+    return target()
+""".strip()
+        + "\n",
+    )
+    _write(
+        repo / "src" / "b.py",
+        """
+def stable():
+    return 1
+
+
+def target():
+    return stable()
+""".strip()
+        + "\n",
+    )
+    _write(
+        repo / "src" / "removed.py",
+        """
+def orphan():
+    return 0
+""".strip()
+        + "\n",
+    )
+
+    first = run(
+        str(repo),
+        PipelineConfig(
+            project="incremental-state",
+            cache_dir=str(cache_dir),
+            export_artifact=False,
+            incremental=False,
+            max_workers=1,
+        ),
+    )
+
+    store = open_path_readonly(first.db_path)
+    try:
+        caller = store.search_nodes(
+            SearchParams(project="incremental-state", name_pattern="%caller%", limit=1)
+        ).rows[0]
+        stable = store.search_nodes(
+            SearchParams(project="incremental-state", name_pattern="%stable%", limit=1)
+        ).rows[0]
+        target = store.search_nodes(
+            SearchParams(project="incremental-state", name_pattern="%target%", limit=2)
+        ).rows
+        assert len(target) == 1
+
+        caller_qn = caller.qualified_name
+        caller_id_before = caller.id
+        stable_qn = stable.qualified_name
+        stable_id_before = stable.id
+        target_qn = target[0].qualified_name
+
+        callees_before = store.bfs_callees(
+            caller_qn,
+            project="incremental-state",
+            max_depth=1,
+        )
+        assert callees_before is not None
+        assert {node.qualified_name for node, _ in callees_before.visited} == {
+            target_qn
+        }
+        removed_before = store.search_nodes(
+            SearchParams(project="incremental-state", name_pattern="%orphan%", limit=1)
+        )
+        assert removed_before.rows
+        caller_file_path = caller.file_path
+        removed_file_path = removed_before.rows[0].file_path
+    finally:
+        store.close()
+
+    _write(
+        repo / "src" / "b.py",
+        """
+def stable():
+    return 2
+
+
+def new_target():
+    return stable()
+""".strip()
+        + "\n",
+    )
+    (repo / "src" / "removed.py").unlink()
+
+    second = run(
+        str(repo),
+        PipelineConfig(
+            project="incremental-state",
+            cache_dir=str(cache_dir),
+            export_artifact=False,
+            incremental=True,
+            max_workers=1,
+        ),
+    )
+
+    assert second.files_unchanged == 1
+    assert second.files_changed == 1
+    assert second.files_added == 0
+    assert second.files_removed == 1
+
+    store = open_path_readonly(second.db_path)
+    try:
+        caller_after = store.get_node_by_qn(caller_qn, project="incremental-state")
+        stable_after = store.get_node_by_qn(stable_qn, project="incremental-state")
+        assert caller_after is not None
+        assert stable_after is not None
+
+        # Unchanged file nodes stay present, and stable symbols in changed
+        # files retain IDs via ON CONFLICT DO UPDATE.
+        assert caller_after.id == caller_id_before
+        assert stable_after.id == stable_id_before
+
+        target_after = store.search_nodes(
+            SearchParams(project="incremental-state", name_pattern="%target%", limit=10)
+        ).rows
+        assert all(row.name != "target" for row in target_after)
+        assert any(row.name == "new_target" for row in target_after)
+
+        removed_after = store.search_nodes(
+            SearchParams(project="incremental-state", name_pattern="%orphan%", limit=1)
+        )
+        assert removed_after.rows == []
+
+        hashes = store.get_file_hashes("incremental-state")
+        assert caller_file_path in hashes
+        assert removed_file_path not in hashes
+
+        # Edges are rebuilt from stored payloads, so unchanged callers do
+        # not keep stale links to removed symbols.
+        callees_after = store.bfs_callees(
+            caller_qn,
+            project="incremental-state",
+            max_depth=1,
+        )
+        assert callees_after is not None
+        assert callees_after.visited == []
+    finally:
+        store.close()

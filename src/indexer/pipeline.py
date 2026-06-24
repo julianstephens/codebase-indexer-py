@@ -66,6 +66,7 @@ from .store import (
     Store,
     default_db_path,
     open_memory,
+    open_path,
     open_path_readonly,
 )
 from .treesitter import NodeRecord
@@ -164,6 +165,9 @@ class PipelineResult:
         files_discovered:   total files found by walker
         files_skipped:      files excluded (lock files, binaries, etc.)
         files_unchanged:    files skipped in incremental mode
+        files_added:        newly discovered files in incremental mode
+        files_changed:      modified files in incremental mode
+        files_removed:      files removed since the previous index
         files_extracted:    files that were actually parsed
         nodes_total:        total nodes inserted
         nodes_by_label:     dict of label → count
@@ -188,6 +192,9 @@ class PipelineResult:
     files_discovered: int = 0
     files_skipped: int = 0
     files_unchanged: int = 0
+    files_added: int = 0
+    files_changed: int = 0
+    files_removed: int = 0
     files_extracted: int = 0
     nodes_total: int = 0
     nodes_by_label: dict[str, int] = field(default_factory=dict)
@@ -257,21 +264,30 @@ def run(
     t_start = time.monotonic()
     result = PipelineResult(project=config.project)
 
-    db = open_memory()
+    db_path = default_db_path(config.project, config.cache_dir)
+    use_existing_db = config.incremental and Path(db_path).exists()
+    db = open_path(db_path) if use_existing_db else open_memory()
     try:
         # Pass 1: Discover
         all_file_infos = _pass_discover(repo_path, config)
         result.files_discovered = len(all_file_infos)
 
-        # Incremental: filter unchanged files
+        # Incremental: classify file states
         if config.incremental:
-            stored_hashes = _load_stored_hashes(config.project, config)
-            file_infos, unchanged = _pass_filter_unchanged(
-                all_file_infos, stored_hashes
+            stored_hashes = (
+                db.get_file_hashes(config.project) if use_existing_db else {}
+            )
+            file_infos, unchanged, added, removed = _pass_filter_unchanged(
+                all_file_infos,
+                stored_hashes,
             )
             result.files_unchanged = len(unchanged)
+            result.files_changed = len(file_infos) - len(added)
+            result.files_added = len(added)
+            result.files_removed = len(removed)
         else:
             file_infos = all_file_infos
+            removed = []
 
         # Pass 3: Extract
         extraction_results = _pass_extract(file_infos, config)
@@ -285,29 +301,6 @@ def run(
 
         # Pass 4: Assign QNs
         records = _pass_assign_qns(extraction_results, config.project)
-
-        # Pass 5: Build registry
-        reg = _pass_build_registry(records)
-
-        # Pass 6: Resolve calls
-        (
-            edges,
-            calls_discovered,
-            calls_resolved,
-            calls_unresolved,
-            calls_unsupported,
-            malformed_payloads,
-        ) = _pass_resolve_calls(
-            extraction_results,
-            reg,
-            config.project,
-            config,
-        )
-        result.calls_discovered = calls_discovered
-        result.calls_resolved = calls_resolved
-        result.calls_unresolved = calls_unresolved
-        result.calls_unsupported = calls_unsupported
-        result.malformed_payloads = malformed_payloads
         result.relationship_unavailable_languages = sorted(
             {
                 r.language
@@ -318,30 +311,83 @@ def run(
             }
         )
 
-        # Collect file contents + hashes
-        file_contents = _collect_file_contents(file_infos, extraction_results)
-        file_hashes = _collect_file_hashes(file_infos, file_contents)
+        if use_existing_db:
+            (
+                all_records,
+                edges,
+                edges_inserted,
+                calls_discovered,
+                calls_resolved,
+                calls_unresolved,
+                calls_unsupported,
+                malformed_payloads,
+            ) = _pass_store_incremental(
+                db=db,
+                project=config.project,
+                repo_path=repo_path,
+                changed_records=records,
+                extraction_results=extraction_results,
+                changed_file_infos=file_infos,
+                removed_paths=[fi.path for fi in removed],
+                config=config,
+            )
 
-        # Passes 7-9: Store
-        file_languages = {fi.path: fi.language for fi in file_infos}
-        _, edges_inserted = _pass_store(
-            db,
-            config.project,
-            repo_path,
-            records,
-            edges,
-            file_contents,
-            file_hashes,
-            file_languages,
-        )
+            result.calls_discovered = calls_discovered
+            result.calls_resolved = calls_resolved
+            result.calls_unresolved = calls_unresolved
+            result.calls_unsupported = calls_unsupported
+            result.malformed_payloads = malformed_payloads
+            result.nodes_total = len(all_records)
+            result.nodes_by_label = _count_by_label(all_records)
+            result.edges_total = edges_inserted
+            result.edges_by_type = _count_by_edge_type(edges)
+        else:
+            # Pass 5: Build registry
+            reg = _pass_build_registry(records)
 
-        result.nodes_total = len(records)
-        result.nodes_by_label = _count_by_label(records)
-        result.edges_total = edges_inserted
-        result.edges_by_type = _count_by_edge_type(edges)
+            # Pass 6: Resolve calls
+            (
+                edges,
+                calls_discovered,
+                calls_resolved,
+                calls_unresolved,
+                calls_unsupported,
+                malformed_payloads,
+            ) = _pass_resolve_calls(
+                extraction_results,
+                reg,
+                config.project,
+                config,
+            )
+            result.calls_discovered = calls_discovered
+            result.calls_resolved = calls_resolved
+            result.calls_unresolved = calls_unresolved
+            result.calls_unsupported = calls_unsupported
+            result.malformed_payloads = malformed_payloads
+
+            # Collect file contents + hashes
+            file_contents = _collect_file_contents(file_infos, extraction_results)
+            file_hashes = _collect_file_hashes(file_infos, file_contents)
+
+            # Passes 7-9: Store
+            file_languages = {fi.path: fi.language for fi in file_infos}
+            _, edges_inserted = _pass_store(
+                db,
+                config.project,
+                repo_path,
+                records,
+                edges,
+                file_contents,
+                file_hashes,
+                file_languages,
+            )
+
+            result.nodes_total = len(records)
+            result.nodes_by_label = _count_by_label(records)
+            result.edges_total = edges_inserted
+            result.edges_by_type = _count_by_edge_type(edges)
 
         # Pass 10: Dump
-        db_path = default_db_path(config.project, config.cache_dir)
         _pass_dump(db, db_path)
         result.db_path = db_path
     finally:
@@ -446,9 +492,9 @@ def _pass_discover(
 def _pass_filter_unchanged(
     file_infos: list[FileInfo],
     stored_hashes: dict[str, tuple[str, int, int]],
-) -> tuple[list[FileInfo], list[FileInfo]]:
+) -> tuple[list[FileInfo], list[FileInfo], list[FileInfo], list[FileInfo]]:
     """
-    Split FileInfo list into (changed, unchanged) based on stored hashes.
+    Split FileInfo list into (changed, unchanged, added, removed).
 
     A file is considered unchanged when:
       1. Its path is in stored_hashes, AND
@@ -468,15 +514,24 @@ def _pass_filter_unchanged(
                         rel_path → (sha256_hex, mtime_ns, size_bytes)
 
     Returns:
-        (changed, unchanged) tuple of FileInfo lists.
-        changed + unchanged == file_infos (every file is in one list).
+        (changed, unchanged, added, removed) tuple of FileInfo lists.
+        changed + unchanged == file_infos (every discovered file is in one list).
+        added is a subset of changed.
+        removed are files present in stored_hashes but missing from discovery.
     """
     changed = []
     unchanged = []
+    added = []
+    current_paths = {fi.path for fi in file_infos}
+    removed = [
+        FileInfo(path=path, abs_path="", language=None)
+        for path in sorted(stored_hashes.keys() - current_paths)
+    ]
     for fi in file_infos:
         stored = stored_hashes.get(fi.path)
         if stored is None:
             changed.append(fi)
+            added.append(fi)
             continue
         stored_sha256, stored_mtime_ns, _ = stored
         if fi.mtime_ns != stored_mtime_ns:
@@ -494,7 +549,29 @@ def _pass_filter_unchanged(
             unchanged.append(fi)
         else:
             changed.append(fi)
-    return changed, unchanged
+    return changed, unchanged, added, removed
+
+
+def _group_records_by_file(records: list[NodeRecord]) -> dict[str, list[NodeRecord]]:
+    """Group NodeRecords by file_path."""
+    grouped: dict[str, list[NodeRecord]] = {}
+    for record in records:
+        grouped.setdefault(record.file_path, []).append(record)
+    return grouped
+
+
+def _results_from_records(records: list[NodeRecord]) -> dict[str, ExtractionResult]:
+    """Build ExtractionResult mapping from records already loaded from storage."""
+    grouped = _group_records_by_file(records)
+    return {
+        path: ExtractionResult(
+            path=path,
+            records=file_records,
+            language="unknown",
+            extractor="stored",
+        )
+        for path, file_records in grouped.items()
+    }
 
 
 def _pass_extract(
@@ -1025,6 +1102,116 @@ def _pass_store(
     return qn_to_id, edges_inserted
 
 
+def _pass_store_incremental(
+    db: Store,
+    project: str,
+    repo_path: str,
+    changed_records: list[NodeRecord],
+    extraction_results: dict[str, ExtractionResult],
+    changed_file_infos: list[FileInfo],
+    removed_paths: list[str],
+    config: PipelineConfig,
+) -> tuple[
+    list[NodeRecord],
+    list[tuple[str, str, str, dict]],
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+]:
+    """
+    Apply an incremental update while preserving unchanged graph state.
+
+    Steps:
+      1. Upsert changed/new nodes with ID-preserving conflict updates.
+      2. Delete disappeared symbols from changed files and all symbols
+         from removed files.
+      3. Update file contents/hashes only for changed/new files and
+         remove rows for deleted files.
+      4. Rebuild all edges from stored node properties.
+    """
+    changed_records_by_file = _group_records_by_file(changed_records)
+    changed_file_languages = {fi.path: fi.language for fi in changed_file_infos}
+    changed_file_contents = _collect_file_contents(
+        changed_file_infos,
+        extraction_results,
+    )
+    changed_file_hashes = _collect_file_hashes(
+        changed_file_infos,
+        changed_file_contents,
+    )
+
+    db.begin_bulk()
+    db.drop_indexes()
+    db.begin()
+    db.upsert_project(project, repo_path)
+
+    # Remove all symbols for files that disappeared from the repo.
+    for removed_path in removed_paths:
+        db.delete_nodes_for_file(project, removed_path)
+
+    # For each changed file, remove symbols that no longer exist and
+    # upsert symbols that remain/newly appear.
+    for fi in changed_file_infos:
+        path = fi.path
+        existing_qns = db.get_qns_for_file(project, path)
+        next_records = changed_records_by_file.get(path, [])
+        next_qns = {record.qualified_name for record in next_records}
+        stale_qns = sorted(existing_qns - next_qns)
+        if stale_qns:
+            db.delete_nodes_by_qns(project, stale_qns)
+        if next_records:
+            db.insert_nodes(next_records, project)
+
+    if removed_paths:
+        db.delete_files(project, removed_paths)
+        db.delete_file_hashes(project, removed_paths)
+
+    if changed_file_contents:
+        db.insert_files(changed_file_contents, project, changed_file_languages)
+    if changed_file_hashes:
+        db.insert_file_hashes(changed_file_hashes, project)
+
+    # Rebuild all relationships from stored call/import properties.
+    all_records = db.get_node_records(project)
+    reg = _pass_build_registry(all_records)
+    stored_results = _results_from_records(all_records)
+    (
+        all_edges,
+        calls_discovered,
+        calls_resolved,
+        calls_unresolved,
+        calls_unsupported,
+        malformed_payloads,
+    ) = _pass_resolve_calls(
+        stored_results,
+        reg,
+        project,
+        config,
+    )
+    db.delete_edges_for_project(project)
+    qn_to_id = db.get_qn_to_id(project)
+    edges_inserted = db.insert_edges(all_edges, qn_to_id, project)
+
+    db.commit()
+    db.create_indexes()
+    db.end_bulk()
+    db.checkpoint()
+
+    return (
+        all_records,
+        all_edges,
+        edges_inserted,
+        calls_discovered,
+        calls_resolved,
+        calls_unresolved,
+        calls_unsupported,
+        malformed_payloads,
+    )
+
+
 def _pass_dump(
     db: Store,
     db_path: str,
@@ -1092,11 +1279,15 @@ def _load_stored_hashes(
         Empty dict if no previous database exists.
     """
     db_path = default_db_path(project, config.cache_dir)
+    db: Store | None = None
     try:
         db = open_path_readonly(db_path)
         return db.get_file_hashes(project)
     except StoreFileNotFoundError:
         return {}
+    finally:
+        if db is not None:
+            db.close()
 
 
 def _delete_stale_nodes(

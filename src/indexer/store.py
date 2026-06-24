@@ -495,9 +495,9 @@ class Store:
         """
         Bulk-insert NodeRecord objects into the nodes table.
 
-        Uses INSERT OR REPLACE to handle re-indexing: if a node with the
-        same (project, qualified_name) already exists, it is replaced
-        with the new data.
+        Uses INSERT ... ON CONFLICT DO UPDATE so node IDs remain stable
+        when a symbol keeps the same (project, qualified_name) across
+        re-index runs.
 
         Inserts in batches of _INSERT_BATCH_SIZE to avoid hitting
         SQLite's maximum variable count limit.
@@ -529,10 +529,19 @@ class Store:
             rows = [_node_record_to_row(r, project) for r in batch]
             self._conn.executemany(
                 """
-                INSERT OR REPLACE INTO nodes
+                INSERT INTO nodes
                     (project, label, name, qualified_name, file_path,
                      start_line, end_line, signature, source, properties)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project, qualified_name) DO UPDATE SET
+                    label      = excluded.label,
+                    name       = excluded.name,
+                    file_path  = excluded.file_path,
+                    start_line = excluded.start_line,
+                    end_line   = excluded.end_line,
+                    signature  = excluded.signature,
+                    source     = excluded.source,
+                    properties = excluded.properties
                 """,
                 rows,
             )
@@ -567,6 +576,51 @@ class Store:
             (project, file_path),
         )
         return cur.rowcount
+
+    def delete_nodes_by_qns(self, project: str, qualified_names: list[str]) -> int:
+        """
+        Delete nodes by qualified name.
+
+        Used by incremental indexing to remove symbols that disappeared
+        from a changed file while preserving stable IDs for symbols that
+        still exist.
+
+        Args:
+            project: project name
+            qualified_names: node qualified names to delete
+
+        Returns:
+            Number of nodes deleted.
+        """
+        if not qualified_names:
+            return 0
+        total_deleted = 0
+        for batch in _batched(qualified_names, _INSERT_BATCH_SIZE):
+            placeholders = ",".join("?" * len(batch))
+            cur = self._conn.execute(
+                f"DELETE FROM nodes WHERE project = ?"
+                f" AND qualified_name IN ({placeholders})",
+                [project, *batch],
+            )
+            total_deleted += cur.rowcount
+        return total_deleted
+
+    def get_qns_for_file(self, project: str, file_path: str) -> set[str]:
+        """
+        Return all qualified names currently stored for a file.
+
+        Args:
+            project: project name
+            file_path: repo-relative file path
+
+        Returns:
+            Set of qualified names for nodes in that file.
+        """
+        rows = self._conn.execute(
+            "SELECT qualified_name FROM nodes WHERE project = ? AND file_path = ?",
+            (project, file_path),
+        ).fetchall()
+        return {row["qualified_name"] for row in rows}
 
     # ── Edge writes ────────────────────────────────────────────────────────
 
@@ -698,6 +752,109 @@ class Store:
                 """,
                 batch,
             )
+
+    def delete_files(self, project: str, paths: list[str]) -> int:
+        """
+        Delete file content rows for the provided paths.
+
+        Args:
+            project: project name
+            paths: repo-relative file paths
+
+        Returns:
+            Number of file rows deleted.
+        """
+        if not paths:
+            return 0
+        total_deleted = 0
+        for batch in _batched(paths, _INSERT_BATCH_SIZE):
+            placeholders = ",".join("?" * len(batch))
+            cur = self._conn.execute(
+                f"DELETE FROM files WHERE project = ? AND path IN ({placeholders})",
+                [project, *batch],
+            )
+            total_deleted += cur.rowcount
+        return total_deleted
+
+    def delete_file_hashes(self, project: str, paths: list[str]) -> int:
+        """
+        Delete file hash rows for the provided paths.
+
+        Args:
+            project: project name
+            paths: repo-relative file paths
+
+        Returns:
+            Number of hash rows deleted.
+        """
+        if not paths:
+            return 0
+        total_deleted = 0
+        for batch in _batched(paths, _INSERT_BATCH_SIZE):
+            placeholders = ",".join("?" * len(batch))
+            cur = self._conn.execute(
+                f"DELETE FROM file_hashes WHERE project = ?"
+                f" AND path IN ({placeholders})",
+                [project, *batch],
+            )
+            total_deleted += cur.rowcount
+        return total_deleted
+
+    def delete_edges_for_project(self, project: str) -> int:
+        """
+        Delete all edges for a project.
+
+        Used by incremental indexing to rebuild all relationships from
+        stored call/import properties after node updates.
+
+        Args:
+            project: project name
+
+        Returns:
+            Number of edges deleted.
+        """
+        cur = self._conn.execute("DELETE FROM edges WHERE project = ?", (project,))
+        return cur.rowcount
+
+    def get_qn_to_id(self, project: str) -> dict[str, int]:
+        """
+        Return a mapping from qualified name to node ID for a project.
+        """
+        rows = self._conn.execute(
+            "SELECT id, qualified_name FROM nodes WHERE project = ?",
+            (project,),
+        ).fetchall()
+        return {row["qualified_name"]: row["id"] for row in rows}
+
+    def get_node_records(self, project: str) -> list[NodeRecord]:
+        """
+        Return all project nodes as NodeRecord objects.
+
+        This is used by incremental indexing to rebuild edges from the
+        node properties already persisted in the database.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM nodes WHERE project = ? ORDER BY file_path, start_line",
+            (project,),
+        ).fetchall()
+        records: list[NodeRecord] = []
+        for row in rows:
+            props = row["properties"]
+            records.append(
+                NodeRecord(
+                    label=row["label"],
+                    name=row["name"],
+                    qualified_name=row["qualified_name"],
+                    file_path=row["file_path"],
+                    start_line=row["start_line"],
+                    end_line=row["end_line"],
+                    signature=row["signature"],
+                    source=row["source"],
+                    language="",
+                    properties=json.loads(props) if props else {},
+                )
+            )
+        return records
 
     # ── Node reads ─────────────────────────────────────────────────────────
 

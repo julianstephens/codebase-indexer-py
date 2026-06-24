@@ -2,16 +2,17 @@
   "format_version": 1,
   "schema_version": 1,
   "project": "codebase-indexer",
-  "exported_at": "2026-06-24T22:42:23+00:00",
+  "exported_at": "2026-06-24T23:22:17+00:00",
   "compression_level": 9,
-  "uncompressed_bytes": 323584,
-  "compressed_bytes": 36729,
-  "compression_ratio": 8.81,
-  "node_count": 36,
-  "edge_count": 19,
-  "file_count": 9,
+  "uncompressed_bytes": 6266880,
+  "compressed_bytes": 857972,
+  "compression_ratio": 7.3,
+  "node_count": 997,
+  "edge_count": 1476,
+  "file_count": 66,
   "language_counts": {
-    "python": 4
+    "javascript": 7,
+    "python": 27
   },
   "indexer_version": ""
 }
