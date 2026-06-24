@@ -233,6 +233,385 @@ class TestExtractFileFallbackNoDefinitions:
 
 
 # ---------------------------------------------------------------------------
+# Semantic relationship extraction (real source)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSemanticRelationshipsPython:
+    SOURCE = dedent(
+        """
+        import pkg.mod as pm
+        from pkg.sub import thing as local_thing
+
+        def outer(x):
+            import pkg.inner as inner_mod
+
+            def nested():
+                return inner_mod.run(x)
+
+            pm.call(x)
+            local_thing(x)
+            return nested()
+        """
+    )
+
+    def test_extracts_calls_from_real_source(self):
+        records = extract_file("src/example.py", self.SOURCE)
+        outer = next(r for r in records if r.name == "outer")
+
+        calls = outer.properties.get("calls", [])
+        callees = {item["callee"] for item in calls if isinstance(item, dict)}
+        assert "pm.call" in callees
+        assert "local_thing" in callees
+        assert "nested" in callees
+
+    def test_nested_call_not_attributed_to_outer(self):
+        records = extract_file("src/example.py", self.SOURCE)
+        outer = next(r for r in records if r.name == "outer")
+        nested = next(r for r in records if r.name == "nested")
+
+        outer_callees = {
+            item["callee"]
+            for item in outer.properties.get("calls", [])
+            if isinstance(item, dict)
+        }
+        nested_callees = {
+            item["callee"]
+            for item in nested.properties.get("calls", [])
+            if isinstance(item, dict)
+        }
+
+        assert "inner_mod.run" not in outer_callees
+        assert "inner_mod.run" in nested_callees
+
+    def test_extracts_import_bindings(self):
+        records = extract_file("src/example.py", self.SOURCE)
+        outer = next(r for r in records if r.name == "outer")
+
+        imports = outer.properties.get("imports", [])
+        modules = {
+            item["module_path"]
+            for item in imports
+            if isinstance(item, dict) and "module_path" in item
+        }
+        assert "pkg.mod" in modules
+        assert "pkg.sub" in modules
+        assert "pkg.inner" in modules
+
+
+class TestExtractSemanticRelationshipsTypescript:
+    SOURCE = dedent(
+        """
+        import * as svc from "src/payments/service";
+        import { charge as payCharge } from "src/payments/service";
+
+        function checkout(amount: number): number {
+            svc.charge(amount);
+            payCharge(amount);
+            return amount;
+        }
+        """
+    )
+
+    def test_extracts_calls_from_real_ts_source(self):
+        records = extract_file("src/checkout.ts", self.SOURCE)
+        checkout = next(r for r in records if r.name == "checkout")
+
+        calls = checkout.properties.get("calls", [])
+        callees = {item["callee"] for item in calls if isinstance(item, dict)}
+        assert "svc.charge" in callees
+        assert "payCharge" in callees
+
+    def test_extracts_ts_import_aliases(self):
+        records = extract_file("src/checkout.ts", self.SOURCE)
+        checkout = next(r for r in records if r.name == "checkout")
+
+        imports = checkout.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("src/payments/service", tuple(), "svc") in as_map
+        assert ("src/payments/service", ("charge",), "payCharge") in as_map
+
+
+class TestExtractSemanticRelationshipsOtherLanguages:
+    def test_extracts_go_import_alias(self):
+        source = dedent(
+            """
+            package main
+
+            import svc "example.com/payments/service"
+
+            func checkout(amount int) int {
+                return svc.Charge(amount)
+            }
+            """
+        )
+        records = extract_file("src/checkout.go", source)
+        checkout = next(r for r in records if r.name == "checkout")
+
+        imports = checkout.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("example.com/payments/service", ("service",), "svc") in as_map
+
+    def test_extracts_java_import_symbol(self):
+        source = dedent(
+            """
+            import java.util.List;
+
+            class Checkout {
+                void run() {}
+            }
+            """
+        )
+        records = extract_file("src/Checkout.java", source)
+        run_method = next(r for r in records if r.name == "run")
+
+        imports = run_method.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("java.util", ("List",), "") in as_map
+
+    def test_extracts_java_static_wildcard_import(self):
+        source = dedent(
+            """
+            import static java.util.Collections.*;
+
+            class Checkout {
+                void run() {}
+            }
+            """
+        )
+        records = extract_file("src/Checkout.java", source)
+        run_method = next(r for r in records if r.name == "run")
+
+        imports = run_method.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("java.util.Collections", tuple(), "") in as_map
+
+    def test_extracts_csharp_alias_using(self):
+        source = dedent(
+            """
+            using SB = System.Text.StringBuilder;
+
+            class Checkout {
+                void Run() {}
+            }
+            """
+        )
+        records = extract_file("src/Checkout.cs", source)
+        run_method = next(r for r in records if r.name == "Run")
+
+        imports = run_method.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("System.Text", ("StringBuilder",), "SB") in as_map
+
+    def test_extracts_csharp_using_static(self):
+        source = dedent(
+            """
+            using static System.Math;
+
+            class Checkout {
+                void Run() {}
+            }
+            """
+        )
+        records = extract_file("src/Checkout.cs", source)
+        run_method = next(r for r in records if r.name == "Run")
+
+        imports = run_method.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("System", ("Math",), "") in as_map
+
+    def test_extracts_rust_use_alias(self):
+        source = dedent(
+            """
+            use crate::payments::service::Charge as PayCharge;
+
+            fn checkout(amount: i32) -> i32 {
+                amount
+            }
+            """
+        )
+        records = extract_file("src/checkout.rs", source)
+        checkout = next(r for r in records if r.name == "checkout")
+
+        imports = checkout.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("crate::payments::service", ("Charge",), "PayCharge") in as_map
+
+    def test_extracts_rust_grouped_use_items(self):
+        source = dedent(
+            """
+            use crate::payments::{service::Charge as PayCharge, Refund};
+
+            fn checkout(amount: i32) -> i32 {
+                amount
+            }
+            """
+        )
+        records = extract_file("src/checkout.rs", source)
+        checkout = next(r for r in records if r.name == "checkout")
+
+        imports = checkout.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("crate::payments::service", ("Charge",), "PayCharge") in as_map
+        assert ("crate::payments", ("Refund",), "") in as_map
+
+    def test_extracts_kotlin_import_alias(self):
+        source = dedent(
+            """
+            import com.example.payments.Charge as PayCharge
+
+            class Checkout {
+                fun run() {}
+            }
+            """
+        )
+        records = extract_file("src/Checkout.kt", source)
+        owner = next(
+            (r for r in records if r.name in {"run", "Checkout"}),
+            records[0],
+        )
+
+        imports = owner.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("com.example.payments", ("Charge",), "PayCharge") in as_map
+
+    def test_extracts_kotlin_wildcard_import(self):
+        source = dedent(
+            """
+            import com.example.payments.*
+
+            class Checkout {
+                fun run() {}
+            }
+            """
+        )
+        records = extract_file("src/Checkout.kt", source)
+        owner = next(
+            (r for r in records if r.name in {"run", "Checkout"}),
+            records[0],
+        )
+
+        imports = owner.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("com.example.payments", tuple(), "") in as_map
+
+    def test_extracts_swift_typed_import(self):
+        source = dedent(
+            """
+            import struct Foundation.Date
+
+            struct Checkout {
+                func run() {}
+            }
+            """
+        )
+        records = extract_file("src/Checkout.swift", source)
+        owner = next(
+            (r for r in records if r.name in {"run", "Checkout"}),
+            records[0],
+        )
+
+        imports = owner.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("Foundation", ("Date",), "") in as_map
+
+    def test_extracts_scala_import_selector_alias(self):
+        source = dedent(
+            """
+            import payments.service.{Charge => PayCharge}
+
+            class Checkout {
+              def run(): Unit = {}
+            }
+            """
+        )
+        records = extract_file("src/Checkout.scala", source)
+        owner = next(
+            (r for r in records if r.name in {"run", "Checkout"}),
+            records[0],
+        )
+
+        imports = owner.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("payments.service", ("Charge",), "PayCharge") in as_map
+
+    def test_extracts_scala_wildcard_and_skips_hidden_selector(self):
+        source = dedent(
+            """
+            import payments.service._
+            import payments.model.{Charge => _, Refund => BillRefund}
+
+            class Checkout {
+              def run(): Unit = {}
+            }
+            """
+        )
+        records = extract_file("src/Checkout.scala", source)
+        owner = next(
+            (r for r in records if r.name in {"run", "Checkout"}),
+            records[0],
+        )
+
+        imports = owner.properties.get("imports", [])
+        as_map = {
+            (item.get("module_path"), tuple(item.get("names", [])), item.get("alias"))
+            for item in imports
+            if isinstance(item, dict)
+        }
+        assert ("payments.service", tuple(), "") in as_map
+        assert ("payments.model", ("Refund",), "BillRefund") in as_map
+        assert ("payments.model", ("Charge",), "_") not in as_map
+
+
+# ---------------------------------------------------------------------------
 # Real .py file (checkpoint 5)
 # ---------------------------------------------------------------------------
 

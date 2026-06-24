@@ -117,12 +117,15 @@ class Import:
         alias:       the alias if "as Y" was used, else "". For
                      "import numpy as np", alias="np".
         line:        1-based source line of the import statement.
+        in_function: qualified name of the callable where the import is
+                     visible. Empty string means file-level visibility.
     """
 
     module_path: str
     names: list[str] = field(default_factory=list)
     alias: str = ""
     line: int = 0
+    in_function: str = ""
 
 
 @dataclass
@@ -514,15 +517,23 @@ class Registry:
         qual = _qualifier(callee)  # prefix before the last dot, e.g. "service"
 
         for imp in ctx.imports:
+            # Function-local imports are visible only in their owning callable.
+            if imp.in_function and imp.in_function != call.in_function:
+                continue
+
             mod = _normalise_module_path(imp.module_path)
 
             if qual:
                 # Dotted call: "service.charge" or "svc.charge"
                 root = qual.split(".")[0]
                 if imp.alias == root:
-                    # alias refers to the whole module: "import m as root"
-                    # → target = <mod>.<bare>
-                    candidate = f"{mod}.{bare}"
+                    # For import aliases, resolve differently based on import kind:
+                    # - import module as m         → m.func()     => <mod>.func
+                    # - from pkg import Sym as s   → s.method()   => <mod>.Sym.method
+                    if imp.names:
+                        candidate = f"{mod}.{imp.names[0]}.{bare}"
+                    else:
+                        candidate = f"{mod}.{bare}"
                     if candidate in self._by_qn:
                         return Resolution(
                             source_qn=call.in_function,
@@ -545,8 +556,19 @@ class Registry:
                         )
             else:
                 # Bare call: "charge" imported directly from a module.
-                if bare in imp.names or imp.alias == bare:
+                if bare in imp.names:
                     candidate = f"{mod}.{bare}"
+                    if candidate in self._by_qn:
+                        return Resolution(
+                            source_qn=call.in_function,
+                            target_qn=candidate,
+                            strategy="import_map",
+                            confidence=CONFIDENCE_IMPORT_MAP,
+                            call_site=call,
+                        )
+                elif imp.alias == bare:
+                    # Alias can point either to a module or to a named symbol.
+                    candidate = f"{mod}.{imp.names[0]}" if imp.names else mod
                     if candidate in self._by_qn:
                         return Resolution(
                             source_qn=call.in_function,

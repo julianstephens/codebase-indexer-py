@@ -95,6 +95,27 @@ def index(
     print(f"Files:    {extracted} extracted, {unchanged} unchanged, {skipped} skipped")
     print(f"Nodes:      {result.nodes_total}")
     print(f"Edges:      {result.edges_total}")
+    print(
+        "Calls:      "
+        f"{result.calls_discovered} discovered, "
+        f"{result.calls_resolved} resolved, "
+        f"{result.calls_unresolved} unresolved, "
+        f"{result.calls_unsupported} unsupported"
+    )
+    if result.malformed_payloads:
+        print(f"Malformed payloads: {result.malformed_payloads}")
+    if result.relationship_unavailable_languages:
+        unavailable = sorted(
+            {
+                lang
+                for lang in result.relationship_unavailable_languages
+                if lang != "unknown"
+            }
+        )
+        if unavailable:
+            print("Relationship unavailable: " + ", ".join(unavailable))
+        if "unknown" in result.relationship_unavailable_languages:
+            print("Relationship unavailable: unrecognized file types")
     print(f"Elapsed:    {result.elapsed_seconds:.2f}s")
     if result.errors:
         print(f"[red]Errors ({len(result.errors)}):[/red]")

@@ -59,6 +59,8 @@ from typing import Callable
 
 from tree_sitter import Language, Node, Parser
 
+from .relations import extract_file_imports, extract_relationships_for_symbol
+
 # ---------------------------------------------------------------------------
 # NodeRecord
 # ---------------------------------------------------------------------------
@@ -591,12 +593,16 @@ def extract(path: str, source: str) -> list[NodeRecord]:
 
     # Walk the AST and collect NodeRecords
     records: list[NodeRecord] = []
+    definition_types = set(lang_config["definitions"].keys())
+    file_imports = extract_file_imports(root_node, language, lines)
     _walk(
         node=root_node,
         path=path,
         language=language,
         lines=lines,
         defs=lang_config["definitions"],
+        definition_types=definition_types,
+        file_imports=file_imports,
         records=records,
         parent="",
     )
@@ -615,6 +621,8 @@ def _walk(
     language: str,
     lines: list[str],
     defs: dict[str, tuple[str, str | None]],
+    definition_types: set[str],
+    file_imports: list[dict[str, object]],
     records: list[NodeRecord],
     parent: str,
 ) -> None:
@@ -663,6 +671,21 @@ def _walk(
             signature = _extract_signature(child, lines)
             source = _extract_source(child, lines)
             properties = _collect_properties(child, language, lines)
+            rel = extract_relationships_for_symbol(
+                child,
+                language,
+                lines,
+                definition_types,
+            )
+            if rel.calls:
+                properties["calls"] = rel.calls
+            merged_imports = list(file_imports)
+            if rel.imports:
+                merged_imports.extend(rel.imports)
+            if merged_imports:
+                properties["imports"] = merged_imports
+            if rel.unsupported_calls:
+                properties["unsupported_calls"] = rel.unsupported_calls
 
             # Go method_declaration: derive parent from receiver type
             effective_parent = parent
@@ -709,18 +732,50 @@ def _walk(
                             language,
                             lines,
                             defs,
+                            definition_types,
+                            file_imports,
                             records,
                             parent=new_parent,
                         )
                         break
             # Recurse into children with updated parent for class-like nodes
             elif label in ("Class", "Interface", "Type"):
-                _walk(child, path, language, lines, defs, records, parent=name)
+                _walk(
+                    child,
+                    path,
+                    language,
+                    lines,
+                    defs,
+                    definition_types,
+                    file_imports,
+                    records,
+                    parent=name,
+                )
             else:
-                _walk(child, path, language, lines, defs, records, parent=parent)
+                _walk(
+                    child,
+                    path,
+                    language,
+                    lines,
+                    defs,
+                    definition_types,
+                    file_imports,
+                    records,
+                    parent=parent,
+                )
         else:
             # Recurse into non-definition nodes without changing parent
-            _walk(child, path, language, lines, defs, records, parent=parent)
+            _walk(
+                child,
+                path,
+                language,
+                lines,
+                defs,
+                definition_types,
+                file_imports,
+                records,
+                parent=parent,
+            )
 
 
 def _extract_name(

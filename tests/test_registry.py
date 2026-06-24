@@ -100,8 +100,15 @@ def make_import(
     names: list[str] | None = None,
     alias: str = "",
     line: int = 1,
+    in_function: str = "",
 ) -> Import:
-    return Import(module_path=module_path, names=names or [], alias=alias, line=line)
+    return Import(
+        module_path=module_path,
+        names=names or [],
+        alias=alias,
+        line=line,
+        in_function=in_function,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -666,6 +673,63 @@ class TestResolveImportMap:
         )
         res = reg._resolve_import_map(call, ctx)
         assert isinstance(res, Resolution)
+
+    def test_from_import_alias_resolves_symbol(self):
+        reg = self._make_reg()
+        call = make_call("U", in_function="src.orders.views.create")
+        ctx = make_ctx(
+            module_qn="src.orders.views",
+            imports=[make_import("src.auth.models", names=["User"], alias="U")],
+        )
+        res = reg._resolve_import_map(call, ctx)
+        assert res is not None
+        assert res.target_qn == "src.auth.models.User"
+
+    def test_local_import_visible_only_in_own_callable(self):
+        reg = self._make_reg()
+        local_import = make_import(
+            "src.payments.service",
+            names=["charge"],
+            in_function="src.orders.views.with_local",
+        )
+
+        local_call = make_call("charge", in_function="src.orders.views.with_local")
+        other_call = make_call("charge", in_function="src.orders.views.other")
+        ctx = make_ctx(module_qn="src.orders.views", imports=[local_import])
+
+        local_res = reg._resolve_import_map(local_call, ctx)
+        other_res = reg._resolve_import_map(other_call, ctx)
+
+        assert local_res is not None
+        assert local_res.target_qn == "src.payments.service.charge"
+        assert other_res is None
+
+    def test_alias_symbol_dotted_call_resolves_member(self):
+        reg = build(
+            [
+                make_record(
+                    "User",
+                    "src.auth.models.User",
+                    label="Class",
+                    file_path="src/auth/models.py",
+                ),
+                make_record(
+                    "save",
+                    "src.auth.models.User.save",
+                    label="Method",
+                    file_path="src/auth/models.py",
+                    parent="User",
+                ),
+            ]
+        )
+        call = make_call("U.save", in_function="src.orders.views.create")
+        ctx = make_ctx(
+            module_qn="src.orders.views",
+            imports=[make_import("src.auth.models", names=["User"], alias="U")],
+        )
+        res = reg._resolve_import_map(call, ctx)
+        assert res is not None
+        assert res.target_qn == "src.auth.models.User.save"
 
     def test_empty_names_bare_import(self):
         # import src.payments.service  (no "from", no names)

@@ -329,6 +329,15 @@ Call and import inputs are read from `NodeRecord.properties` in pass 6
 Set `min_confidence` in `PipelineConfig` to filter out low-confidence
 edges if fuzzy matches produce too much noise for your use case.
 
+Pipeline runs also report relationship diagnostics:
+
+- discovered calls
+- resolved calls
+- unresolved calls
+- unsupported call expressions omitted from edge emission
+- malformed call/import payload items ignored by parsers
+- languages where relationship extraction is unavailable
+
 ---
 
 ## Running the tests

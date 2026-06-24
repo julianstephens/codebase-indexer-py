@@ -44,7 +44,8 @@ from typing import Callable
 
 from .fallback import MAX_FILE_BYTES, extract_fallback, should_skip
 from .languages import EXTENSION_TO_LANG, LANG_CONFIG
-from .treesitter import NodeRecord
+from .relations import extract_file_imports
+from .treesitter import NodeRecord, _get_parser
 from .treesitter import extract as ts_extract
 
 logger = logging.getLogger(__name__)
@@ -360,7 +361,37 @@ def _run_treesitter(path: str, source: str, language: str) -> ExtractionResult:
             language=language,
             extractor="treesitter",
         )
-    return _run_fallback(path, source, language, "no_definitions")
+
+    fallback = _run_fallback(path, source, language, "no_definitions")
+    _attach_file_imports_to_fallback(path, source, language, fallback.records)
+    return fallback
+
+
+def _attach_file_imports_to_fallback(
+    path: str,  # noqa: ARG001
+    source: str,
+    language: str,
+    records: list[NodeRecord],
+) -> None:
+    """Attach extracted file-scope imports to fallback records when available."""
+    if not records or not source.strip() or language not in LANG_CONFIG:
+        return
+
+    try:
+        parser_name = str(LANG_CONFIG[language]["parser"])
+        parser = _get_parser(parser_name)
+        tree = parser.parse(bytes(source, "utf8"))
+        imports = extract_file_imports(tree.root_node, language, source.splitlines())
+    except Exception:
+        return
+
+    if not imports:
+        return
+
+    for record in records:
+        merged_imports = list(record.properties.get("imports", []))  # type: ignore
+        merged_imports.extend(imports)
+        record.properties["imports"] = merged_imports
 
 
 def _run_fallback(

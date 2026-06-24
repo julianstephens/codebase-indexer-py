@@ -24,6 +24,12 @@ indexer index [REPO_PATH] [OPTIONS]
 indexer index /path/to/my-repo --project my-app --workers 8
 ```
 
+The command summary includes relationship diagnostics:
+
+- discovered/resolved/unresolved/unsupported call counts
+- malformed extraction payload count (if nonzero)
+- languages where relationship extraction is unavailable
+
 ---
 
 ## indexer skeleton

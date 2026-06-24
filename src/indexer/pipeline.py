@@ -60,6 +60,7 @@ from .registry import (
     ResolutionContext,
     build,
 )
+from .relations import REL_STATE_DEFS_AND_RELS, get_relationship_capability
 from .store import (
     DEFAULT_CACHE_DIR,
     Store,
@@ -168,8 +169,14 @@ class PipelineResult:
         nodes_by_label:     dict of label → count
         edges_total:        total edges inserted
         edges_by_type:      dict of type → count
+        calls_discovered:   call sites discovered from extraction payloads
         calls_resolved:     call sites resolved to a known node
         calls_unresolved:   call sites that could not be resolved
+        calls_unsupported:  call expressions omitted as unsupported
+        malformed_payloads: malformed call/import payload items ignored
+        relationship_unavailable_languages:
+                    languages where relationship extraction is
+                    unavailable for this run
         elapsed_seconds:    wall-clock time for the full run
         errors:             list of (file_path, error_message) for any
                             file that failed to read or extract
@@ -186,8 +193,12 @@ class PipelineResult:
     nodes_by_label: dict[str, int] = field(default_factory=dict)
     edges_total: int = 0
     edges_by_type: dict[str, int] = field(default_factory=dict)
+    calls_discovered: int = 0
     calls_resolved: int = 0
     calls_unresolved: int = 0
+    calls_unsupported: int = 0
+    malformed_payloads: int = 0
+    relationship_unavailable_languages: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
     errors: list[tuple[str, str]] = field(default_factory=list)
 
@@ -279,14 +290,33 @@ def run(
         reg = _pass_build_registry(records)
 
         # Pass 6: Resolve calls
-        edges, calls_resolved, calls_unresolved = _pass_resolve_calls(
+        (
+            edges,
+            calls_discovered,
+            calls_resolved,
+            calls_unresolved,
+            calls_unsupported,
+            malformed_payloads,
+        ) = _pass_resolve_calls(
             extraction_results,
             reg,
             config.project,
             config,
         )
+        result.calls_discovered = calls_discovered
         result.calls_resolved = calls_resolved
         result.calls_unresolved = calls_unresolved
+        result.calls_unsupported = calls_unsupported
+        result.malformed_payloads = malformed_payloads
+        result.relationship_unavailable_languages = sorted(
+            {
+                r.language
+                for r in extraction_results.values()
+                if r.language
+                and get_relationship_capability(r.language).state
+                != REL_STATE_DEFS_AND_RELS
+            }
+        )
 
         # Collect file contents + hashes
         file_contents = _collect_file_contents(file_infos, extraction_results)
@@ -592,7 +622,7 @@ def _pass_resolve_calls(
     reg: Registry,
     project: str,
     config: PipelineConfig,
-) -> tuple[list[tuple[str, str, str, dict]], int, int]:
+) -> tuple[list[tuple[str, str, str, dict]], int, int, int, int, int]:
     """
     Pass 6: Resolve call sites to edges in parallel.
 
@@ -616,24 +646,33 @@ def _pass_resolve_calls(
         config:  resolved PipelineConfig (for min_confidence, max_workers)
 
     Returns:
-        (edges, calls_resolved, calls_unresolved) where:
+                (edges, calls_discovered, calls_resolved, calls_unresolved,
+                 calls_unsupported, malformed_payloads) where:
           - edges is a list of (source_qn, target_qn, edge_type, properties)
             tuples ready for store.insert_edges().
+                    - calls_discovered is the count of call sites discovered.
           - calls_resolved is the count of call sites with a resolved target.
           - calls_unresolved is the count of call sites that could not be
             resolved.
+          - calls_unsupported is the count of unsupported call expressions.
+          - malformed_payloads is the count of malformed payload items ignored.
     """
     all_edges: list[tuple[str, str, str, dict]] = []
+    calls_discovered = 0
     calls_resolved = 0
     calls_unresolved = 0
+    calls_unsupported = 0
+    malformed_payloads = 0
     items = list(results.items())
     total = len(items)
 
     def _resolve_file(
         path: str, result: ExtractionResult
-    ) -> tuple[list[tuple[str, str, str, dict]], int, int]:
-        imports = _collect_imports_from_records(result.records)
-        calls = _collect_calls_from_records(result.records)
+    ) -> tuple[list[tuple[str, str, str, dict]], int, int, int, int, int]:
+        imports, import_malformed = _collect_imports_from_records(result.records)
+        calls, call_malformed, unsupported_count = _collect_calls_from_records(
+            result.records
+        )
         ctx = ResolutionContext(
             file_path=path,
             module_qn=module(path),
@@ -641,6 +680,7 @@ def _pass_resolve_calls(
             project=project,
         )
         edges: list[tuple[str, str, str, dict]] = []
+        discovered_count = len(calls)
         resolved_count = 0
         unresolved_count = 0
         for res in reg.resolve_all(calls, ctx):
@@ -662,23 +702,49 @@ def _pass_resolve_calls(
                     },
                 )
             )
-        return edges, resolved_count, unresolved_count
+        return (
+            edges,
+            discovered_count,
+            resolved_count,
+            unresolved_count,
+            unsupported_count,
+            import_malformed + call_malformed,
+        )
 
     with ThreadPoolExecutor(max_workers=config.max_workers) as pool:
         futures = {
             pool.submit(_resolve_file, path, result): path for path, result in items
         }
         for done, future in enumerate(as_completed(futures), 1):
-            edges, resolved_count, unresolved_count = future.result()
+            (
+                edges,
+                discovered_count,
+                resolved_count,
+                unresolved_count,
+                unsupported_count,
+                malformed_count,
+            ) = future.result()
             all_edges.extend(edges)
+            calls_discovered += discovered_count
             calls_resolved += resolved_count
             calls_unresolved += unresolved_count
+            calls_unsupported += unsupported_count
+            malformed_payloads += malformed_count
             _progress(config, "resolve", done, total)
 
-    return all_edges, calls_resolved, calls_unresolved
+    return (
+        all_edges,
+        calls_discovered,
+        calls_resolved,
+        calls_unresolved,
+        calls_unsupported,
+        malformed_payloads,
+    )
 
 
-def _collect_imports_from_records(records: list[NodeRecord]) -> list[Import]:
+def _collect_imports_from_records(
+    records: list[NodeRecord],
+) -> tuple[list[Import], int]:
     """
     Collect Import objects from NodeRecord.properties["imports"].
 
@@ -690,42 +756,60 @@ def _collect_imports_from_records(records: list[NodeRecord]) -> list[Import]:
     Invalid entries are ignored.
     """
     collected: list[Import] = []
-    seen: set[tuple[str, tuple[str, ...], str, int]] = set()
+    malformed = 0
+    seen: set[tuple[str, tuple[str, ...], str, int, str]] = set()
 
     for record in records:
         raw_imports = record.properties.get("imports")
         if raw_imports is None:
             continue
 
-        parsed_items = _parse_import_items(raw_imports)
+        parsed_items, malformed_items = _parse_import_items(
+            raw_imports,
+            default_in_function=record.qualified_name,
+        )
+        malformed += malformed_items
         for imp in parsed_items:
-            key = (imp.module_path, tuple(imp.names), imp.alias, imp.line)
+            key = (
+                imp.module_path,
+                tuple(imp.names),
+                imp.alias,
+                imp.line,
+                imp.in_function,
+            )
             if key in seen:
                 continue
             seen.add(key)
             collected.append(imp)
 
-    return collected
+    return collected, malformed
 
 
-def _parse_import_items(raw_imports: object) -> list[Import]:
+def _parse_import_items(
+    raw_imports: object,
+    default_in_function: str,
+) -> tuple[list[Import], int]:
     """Parse raw import payload(s) into Import objects."""
     if isinstance(raw_imports, (str, dict)):
         raw_items = [raw_imports]
     elif isinstance(raw_imports, list):
         raw_items = raw_imports
     else:
-        return []
+        return [], 1
 
     imports: list[Import] = []
+    malformed = 0
     for item in raw_items:
         if isinstance(item, str):
             module_path = item.strip()
             if module_path:
-                imports.append(Import(module_path=module_path))
+                imports.append(Import(module_path=module_path, in_function=""))
+            else:
+                malformed += 1
             continue
 
         if not isinstance(item, dict):
+            malformed += 1
             continue
 
         module_path_obj = (
@@ -735,9 +819,11 @@ def _parse_import_items(raw_imports: object) -> list[Import]:
             or item.get("import")
         )
         if not isinstance(module_path_obj, str):
+            malformed += 1
             continue
         module_path = module_path_obj.strip()
         if not module_path:
+            malformed += 1
             continue
 
         names_raw = item.get("names")
@@ -750,6 +836,17 @@ def _parse_import_items(raw_imports: object) -> list[Import]:
         alias_raw = item.get("alias") or item.get("as")
         alias = alias_raw.strip() if isinstance(alias_raw, str) else ""
 
+        scope_raw = item.get("scope")
+        scope = scope_raw.strip() if isinstance(scope_raw, str) else ""
+
+        in_function_raw = item.get("in_function") or item.get("source_qn")
+        if isinstance(in_function_raw, str) and in_function_raw.strip():
+            in_function = in_function_raw.strip()
+        elif scope == "local":
+            in_function = default_in_function
+        else:
+            in_function = ""
+
         line_raw = item.get("line", 0)
         line = line_raw if isinstance(line_raw, int) else 0
 
@@ -759,13 +856,16 @@ def _parse_import_items(raw_imports: object) -> list[Import]:
                 names=names,
                 alias=alias,
                 line=line,
+                in_function=in_function,
             )
         )
 
-    return imports
+    return imports, malformed
 
 
-def _collect_calls_from_records(records: list[NodeRecord]) -> list[CallSite]:
+def _collect_calls_from_records(
+    records: list[NodeRecord],
+) -> tuple[list[CallSite], int, int]:
     """
     Collect CallSite objects from NodeRecord.properties call payloads.
 
@@ -773,9 +873,15 @@ def _collect_calls_from_records(records: list[NodeRecord]) -> list[CallSite]:
     dicts, or lists of either.
     """
     collected: list[CallSite] = []
+    malformed = 0
+    unsupported = 0
     seen: set[tuple[str, int, str, str]] = set()
 
     for record in records:
+        unsupported_raw = record.properties.get("unsupported_calls", 0)
+        if isinstance(unsupported_raw, int) and unsupported_raw > 0:
+            unsupported += unsupported_raw
+
         raw_calls = record.properties.get("calls")
         if raw_calls is None:
             raw_calls = record.properties.get("call_sites")
@@ -783,7 +889,10 @@ def _collect_calls_from_records(records: list[NodeRecord]) -> list[CallSite]:
             continue
 
         default_in_function = record.qualified_name
-        parsed_items = _parse_call_items(raw_calls, default_in_function)
+        parsed_items, malformed_items = _parse_call_items(
+            raw_calls, default_in_function
+        )
+        malformed += malformed_items
         for call in parsed_items:
             key = (call.callee, call.line, call.qualifier, call.in_function)
             if key in seen:
@@ -791,19 +900,23 @@ def _collect_calls_from_records(records: list[NodeRecord]) -> list[CallSite]:
             seen.add(key)
             collected.append(call)
 
-    return collected
+    return collected, malformed, unsupported
 
 
-def _parse_call_items(raw_calls: object, default_in_function: str) -> list[CallSite]:
+def _parse_call_items(
+    raw_calls: object,
+    default_in_function: str,
+) -> tuple[list[CallSite], int]:
     """Parse raw call payload(s) into CallSite objects."""
     if isinstance(raw_calls, (str, dict)):
         raw_items = [raw_calls]
     elif isinstance(raw_calls, list):
         raw_items = raw_calls
     else:
-        return []
+        return [], 1
 
     calls: list[CallSite] = []
+    malformed = 0
     for item in raw_items:
         if isinstance(item, str):
             callee = item.strip()
@@ -815,16 +928,21 @@ def _parse_call_items(raw_calls: object, default_in_function: str) -> list[CallS
                         in_function=default_in_function,
                     )
                 )
+            else:
+                malformed += 1
             continue
 
         if not isinstance(item, dict):
+            malformed += 1
             continue
 
         callee_raw = item.get("callee") or item.get("name") or item.get("target")
         if not isinstance(callee_raw, str):
+            malformed += 1
             continue
         callee = callee_raw.strip()
         if not callee:
+            malformed += 1
             continue
 
         qualifier_raw = item.get("qualifier") or item.get("qual")
@@ -848,7 +966,7 @@ def _parse_call_items(raw_calls: object, default_in_function: str) -> list[CallS
             )
         )
 
-    return calls
+    return calls, malformed
 
 
 def _pass_store(
