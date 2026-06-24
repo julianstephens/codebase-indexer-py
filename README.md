@@ -1,6 +1,6 @@
 # codebase-indexer
 
-**Inspired by [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**
+**A simplified, non-mcp version of [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**
 
 A Python tool that walks a source repository, extracts every function,
 class, method, interface, and type definition using tree-sitter, stores
