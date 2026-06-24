@@ -2,7 +2,7 @@
 
 ## Overview
 
-Attach `codebase-indexer` to an agent session by building a skeleton string at startup, then registering three tools the agent can call on demand.
+Attach `codebase-indexer-py` to an agent session by building a skeleton string at startup, then registering three tools the agent can call on demand.
 
 ## Session setup
 
@@ -10,7 +10,7 @@ Attach `codebase-indexer` to an agent session by building a skeleton string at s
 from indexer.context import build_context
 from indexer.tools import get_source, search, trace_callers
 
-db_path = "~/.cache/repo-indexer/my-app.db"
+db_path = "~/.cache/codebase-indexer/my-app.db"
 
 # Build the skeleton (auto-selects rendering mode by token budget)
 skeleton = build_context(db_path, project="my-app", token_budget=8_000)

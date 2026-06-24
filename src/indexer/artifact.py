@@ -188,8 +188,8 @@ def export(
                            artifact file cannot be written.
 
     Examples:
-        >>> stats = export("/home/user/.cache/repo-indexer/my-app.db",
-        ...                "/path/to/repo/.repo-index")
+        >>> stats = export("/home/user/.cache/codebase-indexer/my-app.db",
+        ...                "/path/to/repo/.codebase-index")
         >>> stats.compression_ratio
         10.3
         >>> Path(stats.artifact_path).exists()
@@ -281,8 +281,8 @@ def import_artifact(
 
     Examples:
         >>> meta = import_artifact(
-        ...     "/path/to/repo/.repo-index",
-        ...     "/home/user/.cache/repo-indexer/my-app.db",
+        ...     "/path/to/repo/.codebase-index",
+        ...     "/home/user/.cache/codebase-indexer/my-app.db",
         ... )
         >>> meta.project
         'my-app'
@@ -348,7 +348,7 @@ def read_meta(artifact_dir: str) -> ArtifactMeta | None:
         None if artifact.json does not exist or cannot be parsed.
 
     Examples:
-        >>> meta = read_meta("/path/to/repo/.repo-index")
+        >>> meta = read_meta("/path/to/repo/.codebase-index")
         >>> meta.project
         'my-app'
         >>> read_meta("/nonexistent/dir") is None
@@ -371,7 +371,7 @@ def artifact_exists(artifact_dir: str) -> bool:
         True if both files exist, False otherwise.
 
     Examples:
-        >>> artifact_exists("/path/to/repo/.repo-index")
+        >>> artifact_exists("/path/to/repo/.codebase-index")
         True
         >>> artifact_exists("/path/to/empty/dir")
         False
@@ -635,7 +635,7 @@ def _write_gitattributes(artifact_dir: str) -> None:
     Write a .gitattributes file marking graph.db.zst as binary.
 
     Content written:
-        # repo-indexer artifact
+        # codebase-indexer artifact
         graph.db.zst binary merge=ours
 
     The "binary" attribute disables diff and merge for the file.
@@ -653,7 +653,7 @@ def _write_gitattributes(artifact_dir: str) -> None:
     ga_path = Path(artifact_dir) / GITATTRIBUTES_NAME
     if not ga_path.exists():
         ga_path.write_text(
-            "# repo-indexer artifact\ngraph.db.zst binary merge=ours\n",
+            "# codebase-indexer artifact\ngraph.db.zst binary merge=ours\n",
             encoding="utf-8",
         )
 

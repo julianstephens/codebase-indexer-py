@@ -94,7 +94,7 @@ class PipelineConfig:
 
         artifact_dir:
             Directory where the compressed .zst artifact is written.
-            Defaults to "<repo_path>/.repo-index/".
+            Defaults to "<repo_path>/.codebase-index/".
 
         max_workers:
             Number of threads for parallel read/extract/resolve passes.
@@ -213,7 +213,7 @@ def run(
     The compressed artifact (if config.export_artifact is True) is
     written to:
         <config.artifact_dir>/graph.db.zst
-    defaulting to <repo_path>/.repo-index/graph.db.zst.
+    defaulting to <repo_path>/.codebase-index/graph.db.zst.
 
     Args:
         repo_path: absolute or relative path to the repository root.
@@ -232,7 +232,7 @@ def run(
         >>> result.nodes_total
         247
         >>> result.artifact_path
-        '/path/to/my-repo/.repo-index/graph.db.zst'
+        '/path/to/my-repo/.codebase-index/graph.db.zst'
     """
     repo_path = str(Path(repo_path).resolve())
     if not Path(repo_path).is_dir():
@@ -361,7 +361,7 @@ def _resolve_config(
 
     Mutates and returns the same config object:
       - Sets config.project from fqn.from_path() if empty.
-      - Sets config.artifact_dir to "<repo_path>/.repo-index" if empty.
+      - Sets config.artifact_dir to "<repo_path>/.codebase-index" if empty.
       - Sets config.max_workers to min(8, cpu_count) if 0.
 
     Args:
@@ -374,7 +374,7 @@ def _resolve_config(
     if not config.project:
         config.project = from_path(repo_path)
     if not config.artifact_dir:
-        config.artifact_dir = f"{repo_path}/.repo-index"
+        config.artifact_dir = f"{repo_path}/.codebase-index"
     if config.max_workers <= 0:
         import os
 

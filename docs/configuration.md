@@ -10,8 +10,8 @@ from indexer.walker import WalkConfig
 
 config = PipelineConfig(
     project="my-app",               # default: derived from repo dir name
-    cache_dir="~/.cache/repo-indexer",
-    artifact_dir="/repo/.repo-index",
+    cache_dir="~/.cache/codebase-indexer",
+    artifact_dir="/repo/.codebase-index",
     max_workers=8,                  # parallel read/extract/resolve threads
     walk_config=WalkConfig(
         max_file_bytes=2 * 1024 * 1024,
@@ -32,8 +32,8 @@ config = PipelineConfig(
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `project` | `str` | dir name | Project name used for cache file naming |
-| `cache_dir` | `str` | `~/.cache/repo-indexer` | Directory for the working `.db` file |
-| `artifact_dir` | `str` | `<repo>/.repo-index` | Directory for the exported artifact |
+| `cache_dir` | `str` | `~/.cache/codebase-indexer` | Directory for the working `.db` file |
+| `artifact_dir` | `str` | `<repo>/.codebase-index` | Directory for the exported artifact |
 | `max_workers` | `int` | `4` | Number of parallel worker threads |
 | `min_confidence` | `float` | `0.0` | Minimum call-edge confidence score |
 | `incremental` | `bool` | `False` | Skip files unchanged since last index |

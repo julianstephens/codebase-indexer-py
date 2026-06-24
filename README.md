@@ -1,4 +1,4 @@
-# codebase-indexer
+# codebase-indexer-py
 
 **A simplified, non-mcp version of [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)**
 
@@ -39,7 +39,7 @@ registry.py        builds symbol index, resolves call sites → edges
 store.py           bulk-inserts nodes + edges into SQLite (WAL, FTS5)
      │
      ▼
-artifact.py        VACUUM INTO + zstd → .repo-index/graph.db.zst
+artifact.py        VACUUM INTO + zstd → .codebase-index/graph.db.zst
      │
      ▼
 context.py         renders skeleton string for the agent (4 modes)
@@ -107,7 +107,7 @@ indexer index /path/to/my-repo
 Produces:
 
 ```
-/path/to/my-repo/.repo-index/
+/path/to/my-repo/.codebase-index/
     graph.db.zst       compressed knowledge graph
     artifact.json      metadata (node counts, compression ratio, etc.)
     .gitattributes     marks graph.db.zst as binary + merge=ours
@@ -116,7 +116,7 @@ Produces:
 The working database is cached at:
 
 ```txt
-~/.cache/repo-indexer/<project>.db
+~/.cache/codebase-indexer/<project>.db
 ```
 
 ### Print the skeleton
@@ -164,7 +164,7 @@ print(f"Artifact: {result.artifact_path}")
 from indexer.context import build_context
 from indexer.tools import get_source, search, trace_callers
 
-db_path = "~/.cache/repo-indexer/my-app.db"
+db_path = "~/.cache/codebase-indexer/my-app.db"
 
 # Build the skeleton (auto-selects rendering mode by token budget)
 skeleton = build_context(db_path, project="my-app", token_budget=8_000)
@@ -225,8 +225,8 @@ from indexer.walker import WalkConfig
 
 config = PipelineConfig(
     project="my-app",               # default: derived from repo dir name
-    cache_dir="~/.cache/repo-indexer",
-    artifact_dir="/repo/.repo-index",
+    cache_dir="~/.cache/codebase-indexer",
+    artifact_dir="/repo/.codebase-index",
     max_workers=8,                  # parallel read/extract/resolve threads
     walk_config=WalkConfig(
         max_file_bytes=2 * 1024 * 1024,

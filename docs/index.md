@@ -1,4 +1,4 @@
-# codebase-indexer
+# codebase-indexer-py
 
 This project is a reverse-engineered, simplified reimplementation of [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) by DeusData. It drops the MCP protocol and reduces the implementation to a standalone Python library and CLI, retaining the core ideas around indexing approach, graph schema, and agent tooling design.
 
@@ -33,7 +33,7 @@ registry.py        builds symbol index, resolves call sites -> edges
 store.py           bulk-inserts nodes + edges into SQLite (WAL, FTS5)
      |
      v
-artifact.py        VACUUM INTO + zstd -> .repo-index/graph.db.zst
+artifact.py        VACUUM INTO + zstd -> .codebase-index/graph.db.zst
      |
      v
 context.py         renders skeleton string for the agent (4 modes)

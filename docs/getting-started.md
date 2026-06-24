@@ -3,14 +3,14 @@
 ## Installation
 
 ```bash
-pip install codebase-indexer
+pip install codebase-indexer-py
 ```
 
 Or install from source:
 
 ```bash
-git clone https://github.com/julianstephens/codebase-indexer
-cd codebase-indexer
+git clone https://github.com/julianstephens/codebase-indexer-py.git
+cd codebase-indexer-py
 pip install .
 ```
 
@@ -23,7 +23,7 @@ indexer index /path/to/my-repo
 This produces:
 
 ```
-/path/to/my-repo/.repo-index/
+/path/to/my-repo/.codebase-index/
     graph.db.zst       compressed knowledge graph
     artifact.json      metadata (node counts, compression ratio, etc.)
     .gitattributes     marks graph.db.zst as binary + merge=ours
@@ -32,7 +32,7 @@ This produces:
 The working database is cached at:
 
 ```
-~/.cache/repo-indexer/<project>.db
+~/.cache/codebase-indexer/<project>.db
 ```
 
 ## Print the skeleton

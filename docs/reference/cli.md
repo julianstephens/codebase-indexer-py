@@ -12,7 +12,7 @@ indexer index [REPO_PATH] [OPTIONS]
 |---|---|---|
 | `REPO_PATH` | `.` | Path to the repository root |
 | `--project`, `-p` | dir name | Project name (used for cache file naming) |
-| `--cache-dir` | `~/.cache/repo-indexer` | Directory for the working `.db` file |
+| `--cache-dir` | `~/.cache/codebase-indexer` | Directory for the working `.db` file |
 | `--workers`, `-w` | `0` (auto) | Number of parallel workers |
 | `--incremental` / `--no-incremental` | `--incremental` | Skip files unchanged since last index |
 | `--export` / `--no-export` | `--export` | Write compressed `.zst` artifact on completion |
@@ -39,7 +39,7 @@ indexer skeleton PROJECT [OPTIONS]
 | `PROJECT` | required | Project name |
 | `--mode`, `-m` | auto | Rendering mode: `skeleton`, `compact`, `summary`, `deps` |
 | `--db` | derived | Path to the `.db` file (overrides cache lookup) |
-| `--cache-dir` | `~/.cache/repo-indexer` | Directory for `.db` files |
+| `--cache-dir` | `~/.cache/codebase-indexer` | Directory for `.db` files |
 
 **Example:**
 
@@ -62,7 +62,7 @@ indexer get-source QUALIFIED_NAME [OPTIONS]
 | `QUALIFIED_NAME` | required | FQN of the symbol, e.g. `my_app.src.service.charge` |
 | `--project`, `-p` | none | Project name (required when `--db` is not given) |
 | `--db` | derived | Path to the `.db` file |
-| `--cache-dir` | `~/.cache/repo-indexer` | Directory for `.db` files |
+| `--cache-dir` | `~/.cache/codebase-indexer` | Directory for `.db` files |
 
 **Example:**
 
@@ -88,7 +88,7 @@ indexer search QUERY [OPTIONS]
 | `--file`, `-f` | none | SQL `LIKE` pattern for file path, e.g. `src/payments/%` |
 | `--limit`, `-n` | `20` | Maximum number of results to return |
 | `--db` | derived | Path to the `.db` file |
-| `--cache-dir` | `~/.cache/repo-indexer` | Directory for `.db` files |
+| `--cache-dir` | `~/.cache/codebase-indexer` | Directory for `.db` files |
 
 **Example:**
 

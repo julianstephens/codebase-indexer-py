@@ -35,7 +35,7 @@ Public types:
     BFSResult       — output of bfs_callers() / bfs_callees()
 
 Public constants:
-    DEFAULT_CACHE_DIR   — ~/.cache/repo-indexer/
+    DEFAULT_CACHE_DIR   — ~/.cache/codebase-indexer/
     SCHEMA_VERSION      — integer, incremented on schema changes
 """
 
@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_CACHE_DIR: str = str(Path.home() / ".cache" / "repo-indexer")
+DEFAULT_CACHE_DIR: str = str(Path.home() / ".cache" / "codebase-indexer")
 SCHEMA_VERSION: int = _schema.SCHEMA_VERSION
 
 # Batch size for bulk node/edge inserts. Larger batches are faster but
@@ -1304,7 +1304,7 @@ def open_path_readonly(db_path: str) -> Store:
         FileNotFoundError: if db_path does not exist.
 
     Examples:
-        >>> store = open_path_readonly("/home/user/.cache/repo-indexer/my-app.db")
+        >>> store = open_path_readonly("/home/user/.cache/codebase-indexer/my-app.db")
     """
     if not Path(db_path).exists():
         raise FileNotFoundError(db_path)
@@ -1324,15 +1324,15 @@ def default_db_path(project: str, cache_dir: str | None = None) -> str:
     Args:
         project:   project name, e.g. "my-app"
         cache_dir: override for the cache directory. Defaults to
-                   DEFAULT_CACHE_DIR (~/.cache/repo-indexer/).
+                   DEFAULT_CACHE_DIR (~/.cache/codebase-indexer/).
 
     Returns:
         Absolute path string, e.g.
-        "/home/user/.cache/repo-indexer/my-app.db"
+        "/home/user/.cache/codebase-indexer/my-app.db"
 
     Examples:
         >>> default_db_path("my-app")
-        '/home/user/.cache/repo-indexer/my-app.db'
+        '/home/user/.cache/codebase-indexer/my-app.db'
     """
     cache = Path(cache_dir or DEFAULT_CACHE_DIR)
     cache.mkdir(parents=True, exist_ok=True)

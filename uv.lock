@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "codebase-indexer"
+name = "codebase-indexer-py"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
