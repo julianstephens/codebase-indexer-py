@@ -20,3 +20,7 @@ coverage/
 .mypy_cache/
 
 site/
+
+benchmarks/worktrees/
+benchmarks/indexes/
+benchmarks/results/
