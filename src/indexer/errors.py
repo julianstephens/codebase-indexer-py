@@ -170,3 +170,27 @@ class SearchQueryError(QueryError):
         if message is None:
             message = f"Search query failed: {query}"
         super().__init__(message)
+
+
+class EvaluationError(IndexerError):
+    """Raised when there is an error with evaluation."""
+
+    pass
+
+
+class EvaluationSerializationError(EvaluationError):
+    """Raised when an evaluation record cannot be serialized or parsed."""
+
+    def __init__(self, message: str | None = None):
+        if message is None:
+            message = "Evaluation serialization error"
+        super().__init__(message)
+
+
+class UnsupportedTrajectoryEventError(EvaluationError):
+    """Raised when an unsupported trajectory event is encountered."""
+
+    def __init__(self, event_type: str):
+        self.event_type = event_type
+        message = f"Unsupported trajectory event type: {event_type}"
+        super().__init__(message)

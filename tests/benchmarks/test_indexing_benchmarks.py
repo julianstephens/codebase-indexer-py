@@ -246,7 +246,7 @@ def benchmark_results(
 @pytest.mark.benchmark
 @pytest.mark.parametrize("language_case", LANGUAGE_CASES, ids=lambda c: c.name)
 @pytest.mark.parametrize("repo_size", REPO_SIZES, ids=lambda s: s.name)
-def test_indexing_runtime_and_token_savings_matrix(
+def test_indexing_runtime_and_static_context_compression_matrix(
     tmp_path: Path,
     benchmark_results: list[dict],
     language_case: LanguageCase,
