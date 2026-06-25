@@ -194,3 +194,21 @@ class UnsupportedTrajectoryEventError(EvaluationError):
         self.event_type = event_type
         message = f"Unsupported trajectory event type: {event_type}"
         super().__init__(message)
+
+
+class TokenizationError(EvaluationError):
+    """Raised when there is an error during tokenization."""
+
+    def __init__(self, message: str | None = None):
+        if message is None:
+            message = "Tokenization error"
+        super().__init__(message)
+
+
+class InvalidHeuristicError(TokenizationError):
+    """Raised when the heuristic token counter is configured with invalid parameters."""
+
+    def __init__(self, message: str | None = None):
+        if message is None:
+            message = "Invalid heuristic token counter configuration"
+        super().__init__(message)

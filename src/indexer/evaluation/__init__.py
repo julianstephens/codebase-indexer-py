@@ -13,7 +13,6 @@ from .models import (
     TrajectoryEvent,
 )
 from .serialization import (
-    EvaluationSerializationError,
     append_delivery,
     append_event,
     content_identity_from_dict,
@@ -33,17 +32,16 @@ from .serialization import (
     write_events,
     write_metadata,
 )
-from .token_counter import TokenCounter
+from .token_counter import HeuristicTokenCounter
 
 __all__ = [
     "BenchmarkRunMetadata",
     "ContentIdentity",
     "ContextDelivery",
-    "EvaluationSerializationError",
+    "HeuristicTokenCounter",
     "JsonScalar",
     "JsonValue",
     "ModelUsage",
-    "TokenCounter",
     "TokenLedger",
     "ToolCall",
     "ToolResult",
