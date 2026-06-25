@@ -30,7 +30,7 @@ jobs:
           output=$(uvx ruff check)
           exit_code=$?
           if [ $exit_code -ne 0 ]; then
-            echo "lint=$(echo "$output" | sed 's/"/\\"/g')" >> $GITHUB_OUTPUT
+            echo "LINT=$(echo "$output" | sed 's/"/\\"/g')" >> $GITHUB_OUTPUT
             exit $exit_code
           fi
 
@@ -41,7 +41,7 @@ jobs:
           output=$(uv run pytest tests)
           exit_code=$?
           if [ $exit_code -ne 0 ]; then
-            echo "tests=$(echo "$output" | sed 's/"/\\"/g')" >> $GITHUB_OUTPUT
+            echo "TESTS=$(echo "$output" | sed 's/"/\\"/g')" >> $GITHUB_OUTPUT
             exit $exit_code
           fi
 
@@ -52,14 +52,15 @@ jobs:
         run: |
           # Fetch job URL using GitHub CLI and jq filtering
           JOB_URL=$(gh run view ${{ github.run_id }} --json jobs --jq '.jobs[] | select(.name == "Validation" or .name == "${{ github.job }}") | .url' | head -n 1)
-          echo "url=$JOB_URL" >> "$GITHUB_OUTPUT"
+          echo "URL=$JOB_URL" >> "$GITHUB_OUTPUT"
 
       - name: Failure PR comment
         if: always()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          LINT_OUTPUT: ${{ steps.lint-code.outputs.lint }}
-          TESTS_OUTPUT: ${{ steps.run-tests.outputs.tests }}
+          LINT_OUTPUT: ${{ steps.lint-code.outputs.LINT }}
+          TESTS_OUTPUT: ${{ steps.run-tests.outputs.TESTS }}
+          JOB_URL: ${{ steps.get-link.outputs.URL }}
         with:
           script: |
             let msg = "# Validation failed\n\n";
@@ -74,12 +75,12 @@ jobs:
             }
 
             if (changed) {
-              msg += `[View full logs](${{ steps.get-link.outputs.url }})`;
+              msg += `[View full logs](${process.env.JOB_URL})`;
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 body: msg
               })
-              exit(1); 
+              process.exit(1); 
             }
