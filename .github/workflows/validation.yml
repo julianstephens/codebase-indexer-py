@@ -55,7 +55,7 @@ jobs:
           echo "url=$JOB_URL" >> "$GITHUB_OUTPUT"
 
       - name: Failure PR comment
-        if: failure()
+        if: always()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           LINT_OUTPUT: ${{ steps.lint-code.outputs.lint }}
@@ -63,17 +63,22 @@ jobs:
         with:
           script: |
             let msg = "# Validation failed\n\n";
+            let changed = false;
             if (process.env.LINT_OUTPUT) {
               msg += "## Linting Errors\n```\n" + process.env.LINT_OUTPUT + "\n```\n";
+              changed = true;
             }
             if (process.env.TESTS_OUTPUT) {
               msg += "## Test Failures\n```\n" + process.env.TESTS_OUTPUT + "\n```\n";
+              changed = true;
             }
 
-            msg += `[View full logs](${{ steps.get-link.outputs.url }})`;
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: msg
-            })
+            if (changed) {
+              msg += `[View full logs](${{ steps.get-link.outputs.url }})`;
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: msg
+              })
+            }
